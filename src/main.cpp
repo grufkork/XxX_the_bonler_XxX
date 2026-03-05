@@ -7,14 +7,21 @@
 
 #include <VescUart.h>
 
+#include "eigenModel.h"
+#include "functions.h"
+
 const int MPU_ADDR = 0x68;
 int16_t AcX, AcY, AcZ, Tmp, GyX, GyY, GyZ;
 
 static AsyncWebServer server(80);
-static AsyncWebSocket ws("/ws");
+static AsyncWebSocket webSocket("/ws");
 
 VescUart motorL;
 VescUart motorR;
+
+long TICKS_PER_REV = 90;
+float WHEEL_RADIUS = 0.085f; // Meters
+float WHEEL_CIRCUMFERENCE = 2.0f * PI * WHEEL_RADIUS;
 
 // put function declarations here:
 void ReadMPU();
@@ -24,12 +31,17 @@ void setup() {
   Serial.begin(115200);
   Serial2.begin(115200);
   // Serial.println("Starting");
-    Wire.begin();
+  Wire.begin();
   Wire.beginTransmission(MPU_ADDR);
   Wire.write(0x6B);
   Wire.write(0);
   Wire.endTransmission(true);
   
+  while(!Serial) {;}
+  while(!Serial2){;}
+  
+  motorL.setSerialPort(&Serial);
+  motorR.setSerialPort(&Serial2);
   return;
     
 
@@ -42,21 +54,16 @@ void setup() {
 
   return;
   
-  while(!Serial) {;}
-  while(!Serial2){;}
   
-  motorL.setSerialPort(&Serial);
-  motorR.setSerialPort(&Serial2);
-  
-  ws.onEvent([](AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) {
+  webSocket.onEvent([](AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) {
     (void)len;
 
     if (type == WS_EVT_CONNECT) {
-      ws.textAll("new client connected");
+      webSocket.textAll("new client connected");
       client->setCloseClientOnQueueFull(false);
 
     } else if (type == WS_EVT_DISCONNECT) {
-      ws.textAll("client disconnected");
+      webSocket.textAll("client disconnected");
 
     } else if (type == WS_EVT_ERROR) {
 
@@ -76,19 +83,85 @@ void setup() {
     }
   });*/
 
-  server.addHandler(&ws);
+  server.addHandler(&webSocket);
 
   server.begin();
+  
+
+  /// Model.ad FIXME
+
+
 }
 
 float t = 0.0f;
 
+float avgWheelSpeedR = 0.0f;
+float avgWheelSpeedL = 0.0f;
+
+float rWheelPosLast = 0.0f;
+float lWheelPosLast = 0.0f;
+
+unsigned long lastMicros = 0;
+
+float lastPos = 0.0f;
+
+float lastAngle = 0.0f;
+
+float constant_boning = 1.0f;
+
 void loop() {
+  unsigned long currentMicros = micros();
+  float dt = (currentMicros - lastMicros) / 1000000.0f;
+  lastMicros = currentMicros;
   // motorL.setDuty(sin(t)* 1.0f);
   // t += 0.001;
-  for(int i = 0; i < 100; i++){
-    ReadMPU();
+  
+  long motorLPos, motorRPos;
+
+  if ( motorL.getVescValues() ) {
+    motorLPos = motorL.data.tachometer;
   }
+  if ( motorR.getVescValues() ) {
+    motorRPos = motorR.data.tachometer;
+  }
+
+  float rWheelPos = (float)motorRPos / TICKS_PER_REV * WHEEL_CIRCUMFERENCE;
+  float lWheelPos = (float)motorLPos / TICKS_PER_REV * WHEEL_CIRCUMFERENCE;
+  
+  float rWheelSpeed = (rWheelPos - rWheelPosLast) / dt;
+  float lWheelSpeed = (lWheelPos - lWheelPosLast) / dt;
+
+  rWheelPosLast = rWheelPos;
+  lWheelPosLast = lWheelPos;
+
+  avgWheelSpeedL = 0.9f * avgWheelSpeedL + 0.1f * lWheelSpeed;
+  avgWheelSpeedR = 0.9f * avgWheelSpeedR + 0.1f * rWheelSpeed;
+  
+  float pos = (rWheelPos + lWheelPos) / 2.0f;
+  float velocity = (rWheelSpeed + lWheelSpeed) / 2.0f;
+  lastPos = pos;
+
+  ReadMPU();
+  
+  float angle = atan2f((float)AcY, (float)AcZ);
+  float angVel = (angle - lastAngle) / dt;
+  lastAngle = angle;
+
+  
+  VectorXf state(4);
+  state << pos, angle, velocity, angVel;
+  Vector2f tau = Model.K_lqr * state;
+
+  float tau_refL = tau(0);
+  float tau_refR = tau(1);
+
+  Model.u_prev << tau_refL, tau_refR;
+
+  motorL.setCurrent(tau_refL * constant_boning);
+  motorR.setCurrent(tau_refR * constant_boning);
+
+  return;
+  Serial.println(angle);
 
   Serial.println(AcX);
   Serial.println(AcY);
