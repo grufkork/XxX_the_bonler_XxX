@@ -26,7 +26,15 @@ float WHEEL_CIRCUMFERENCE = 2.0f * PI * WHEEL_RADIUS;
 // put function declarations here:
 void ReadMPU();
 
+float constant_boning = 0.8f;
+float r_constant = 1.6f;
+float angle_offset = 0.07f;
+
 void setup() {
+  Model.K_lqr <<  
+    -1.39734, -13.3706, -1.48825, -0.981489, -0.551298,
+    -1.39734, -13.3706, -1.48825, -0.981489, -0.551298;
+
 
   Serial.begin(115200);
   Serial2.begin(115200);
@@ -42,7 +50,6 @@ void setup() {
   
   motorL.setSerialPort(&Serial);
   motorR.setSerialPort(&Serial2);
-  return;
     
 
   WiFi.mode(WIFI_AP);
@@ -52,7 +59,6 @@ void setup() {
   // Serial.println("Is ok?");
   
 
-  return;
   
   
   webSocket.onEvent([](AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type, void *arg, uint8_t *data, size_t len) {
@@ -70,8 +76,9 @@ void setup() {
     } else if (type == WS_EVT_PONG) {
 
     } else if (type == WS_EVT_DATA) {
-      motorL.setCurrent(((float)data[0]) / 255.0f * 3.0f);
-      motorR.setCurrent(-((float)data[1]) / 255.0f * 3.0f);
+      constant_boning = ((float)data[0]) / 255.0f;
+      // motorL.setCurrent(((float)data[0]) / 255.0f * 3.0f);
+      // motorR.setCurrent(-((float)data[1]) / 255.0f * 3.0f);
     }
   });
 
@@ -107,7 +114,6 @@ float lastPos = 0.0f;
 
 float lastAngle = 0.0f;
 
-float constant_boning = 1.0f;
 
 void loop() {
   unsigned long currentMicros = micros();
@@ -118,12 +124,12 @@ void loop() {
   
   long motorLPos, motorRPos;
 
-  if ( motorL.getVescValues() ) {
-    motorLPos = motorL.data.tachometer;
-  }
-  if ( motorR.getVescValues() ) {
-    motorRPos = motorR.data.tachometer;
-  }
+  // if ( motorL.getVescValues() ) {
+  //   motorLPos = motorL.data.tachometer;
+  // }
+  // if ( motorR.getVescValues() ) {
+  //   motorRPos = motorR.data.tachometer;
+  // }
 
   float rWheelPos = (float)motorRPos / TICKS_PER_REV * WHEEL_CIRCUMFERENCE;
   float lWheelPos = (float)motorLPos / TICKS_PER_REV * WHEEL_CIRCUMFERENCE;
@@ -143,32 +149,50 @@ void loop() {
 
   ReadMPU();
   
-  float angle = atan2f((float)AcY, (float)AcZ);
+  float accAngle = atan2f((float)AcY, (float)AcZ) - angle_offset;
+
+  float gyroSpeed = (float)GyX / 131.0f * DEG_TO_RAD;
+  
+  float gamma = 0.995f;
+
+  float angle = gamma * (lastAngle + gyroSpeed * dt) + (1.0f - gamma) * accAngle;
+  lastAngle = angle;
+
+
+
   float angVel = (angle - lastAngle) / dt;
   lastAngle = angle;
 
   
-  VectorXf state(4);
-  state << pos, angle, velocity, angVel;
-  Vector2f tau = Model.K_lqr * state;
+  VectorXf state(5);
+  state << pos, angle, velocity, angVel, 0.0f;
+  Vector2f tau = -Model.K_lqr * state;
 
   float tau_refL = tau(0);
   float tau_refR = tau(1);
+  
+  // Serial.println(angle);
 
   Model.u_prev << tau_refL, tau_refR;
 
-  motorL.setCurrent(tau_refL * constant_boning);
-  motorR.setCurrent(tau_refR * constant_boning);
+  motorL.setCurrent(-tau_refL * constant_boning);
+  motorR.setCurrent(tau_refR * constant_boning * r_constant);
 
-  return;
-  Serial.println(angle);
+  // return;
+  // Serial.println(angle * 100.0f);
 
-  Serial.println(AcX);
-  Serial.println(AcY);
-  Serial.println(AcZ);
-  Serial.println(GyX);
-  Serial.println(GyY);
-  Serial.println(GyZ);
+  // Serial.println(AcX);
+  // Serial.println(AcY);
+  // Serial.println(AcZ);
+  // Serial.println(GyX);
+  // Serial.println(GyY);
+  // Serial.println(GyZ);
+  
+  // Serial.println();
+  // Serial.println();
+  
+  // delay(10);
+  
 }
 
 void ReadMPU(){
