@@ -9,14 +9,14 @@ using namespace Eigen;
 class StateSpaceModel {
 public:
     // System dimensions (default)
-    int n = 5;          // Number of states
+    int n = 4;          // Number of states
     int m = 2;          // Number of inputs
-    int p = 5;          // Number of outputs
+    int p = 4;          // Number of outputs
     float Ts = 0.01;    // Sampling time
 
     // Matrices
     MatrixXf Ac, Bc, C, Ad, Bd, Kf, I;
-    MatrixXf Q, R, P, P_prev, P_pred, S;
+    MatrixXf Qx, Qu, P, P_prev, P_pred, S;
     MatrixXf K_lqr;
 
     // Vectors

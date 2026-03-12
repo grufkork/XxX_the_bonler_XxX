@@ -1,17 +1,18 @@
 #include "eigenModel.h"
+#include "printLinalg.h"
 
 // ================= Constructor =================
 StateSpaceModel::StateSpaceModel() {
     Ac.resize(n, n);
-    Bc.resize(n, n);
+    Bc.resize(n, m);
     C.resize(p, n);
     Ad.resize(n, n);
     Bd.resize(n, m);
     Kf.resize(n, p);
     I = MatrixXf::Identity(n, n);
 
-    Q.resize(n, n);
-    R.resize(p, p);
+    Qx.resize(n, n);
+    Qu.resize(m, m);
     P.resize(n, n);
     P_prev.resize(n, n);
     P_pred.resize(n, n);
@@ -40,10 +41,10 @@ StateSpaceModel::StateSpaceModel() {
 VectorXf StateSpaceModel::kalmanFilter(const VectorXf& y_meas) {
     // Prediction
     x_pred = Ad * x_prev + Bd * u_prev;
-    P_pred = Ad * P_prev * Ad.transpose() + Q;
+    P_pred = Ad * P_prev * Ad.transpose() + Qx; // TODO FIXME: Qx and Qu are not correct
 
     // Measurement update
-    S = C * P_pred * C.transpose() + R;
+    S = C * P_pred * C.transpose() + Qu;
     Kf = P_pred * C.transpose() * S.inverse();
     v = y_meas - C * x_pred;
 
@@ -90,23 +91,29 @@ void StateSpaceModel::solveRicatti() {
 
     // Solve Discrete-time Algebraic Riccati Equation (DARE)
     MatrixXf P_tmp = MatrixXf::Zero(n, n);
-    float tolerance = 1;
+    float tolerance = 0.005;
     int max_iterations = 1000;
     int i = 0;
+    
+    // Serial.println("AAA");
 
     while ((P - P_tmp).norm() > tolerance && i <= max_iterations) {
         P_tmp = P;
 
-        MatrixXf K = P*Bd*(R + Bd.transpose()*P*Bd).inverse();
-        P = Q + Ad.transpose()*(P - K*Bd.transpose()*P)*Ad;
+        MatrixXf K = P*Bd*(Qu + Bd.transpose()*P*Bd).inverse();
+        P = Qx + Ad.transpose()*(P - K*Bd.transpose()*P)*Ad;
 
         if (i == max_iterations){
-            Serial.println("The Riccati matrix P has not converged!");
+            // Serial.println("The Riccati matrix P has not converged!");
         }
         i++;
     };
     // Compute LQR Gain: L = (R + B^T P B)^-1 B^T P A
-    K_lqr = (R + Bd.transpose()*P*Bd).inverse()*Bd.transpose()*P*Ad;
+    // Serial.print("Iterations:");
+    // Serial.println(i);
+    K_lqr = (Qu + Bd.transpose()*P*Bd).inverse()*Bd.transpose()*P*Ad;
+    // printMatrix("K_lqr", K_lqr);
+    // printMatrix("P", P);
 }
 
 

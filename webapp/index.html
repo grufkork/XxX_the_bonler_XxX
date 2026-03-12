@@ -15,6 +15,18 @@
 
     <textarea id="lqr-coeffs"></textarea>
     <button onclick="submit_lqr()">Update LQR</button>
+
+    <div id="lqr-params"></div>
+    <button onclick="send_lqr_params()">Update params and recalc</button><br>
+    <button onclick="set_running(true)" class="bigbutton">ON</button>
+    <button onclick="set_running(false)" class="bigbutton">OFF</button>
+
+    <style>
+        .bigbutton{
+            width: 10em;
+            height: 5em;
+        }
+    </style>
 </body>
 
 <script src="index.js"></script>
