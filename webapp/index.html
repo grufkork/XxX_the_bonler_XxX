@@ -6,57 +6,15 @@
     <title>Boner?</title>
 </head>
 <body>
-    <p id="status">waiting...</p>
+    <p id="status">loading script...</p>
     <input type="range" value = "0" max="1" step = "0.0001" id="speed"> Speed <br>
-    <input type="range" value = "0.5" max="1" step = "0.0001" id="dir"> Dir
+    <input type="range" value = "0.5" max="1" step = "0.0001" id="dir"> Dir <br>
+
+    <input value = "1.0" id="boning-constant"> Boning constant <br>
+    <input value = "1.0" id="right-coeff"> Right motor coeff <br>
+
+    <textarea id="lqr-coeffs"></textarea>
+    <button onclick="submit_lqr()">Update LQR</button>
 </body>
 
-<script>
-    let socket = new WebSocket("ws://192.168.4.1:80/ws");
-    let statusDisplay = document.getElementById("status");
-
-    let speed = document.getElementById("speed");
-    let dir = document.getElementById("dir");
-
-    let data = new Uint8Array(2);
-
-    socket.onopen = (e) => {
-        console.log(e);
-        statusDisplay.innerText = "Connected";
-    };
-
-    socket.onmessage = (e) => {
-        console.log(e);
-    };
-
-    socket.onclose = (e) => {
-        console.log(e);
-        statusDisplay.innerText = "Closed";
-    };
-
-    socket.onerror = (e) => {
-        console.log(e);
-        statusDisplay.innerText = "Error";
-    };
-
-    speed.oninput = () => {
-        handleInput();
-    };
-
-    dir.oninput = () => {
-        handleInput();
-    };
-
-    function handleInput(){
-        let s = parseFloat(speed.value);
-        let d = parseFloat(dir.value);
-
-        let L = s * Math.min(0.5, d) * 2;
-        let R = s * Math.min(0.5, 1 - d) * 2;
-
-        data[0] = Math.floor(L * 255);
-        data[1] = Math.floor(R * 255);
-
-        socket.send(data);
-    }
-</script>
+<script src="index.js"></script>

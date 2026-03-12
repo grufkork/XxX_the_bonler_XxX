@@ -10,6 +10,9 @@
 #include "eigenModel.h"
 #include "functions.h"
 
+// En motor väger 2.9kg
+// Hela väger 10.69kg
+
 const int MPU_ADDR = 0x68;
 int16_t AcX, AcY, AcZ, Tmp, GyX, GyY, GyZ;
 
@@ -26,12 +29,17 @@ float WHEEL_CIRCUMFERENCE = 2.0f * PI * WHEEL_RADIUS;
 // put function declarations here:
 void ReadMPU();
 
-float constant_boning = 0.8f;
-float r_constant = 1.6f;
+float boning_constant = 0.8f;
+float r_coeff = 1.6f;
 float angle_offset = 0.07f;
 
+
+#define LQR_MSG 0x01
+#define BONING_MSG 0x02
+#define R_COEFF_MSG 0x03
+
 void setup() {
-  Model.K_lqr <<  
+  Model.K_lqr <<
     -1.39734, -13.3706, -1.48825, -0.981489, -0.551298,
     -1.39734, -13.3706, -1.48825, -0.981489, -0.551298;
 
@@ -65,20 +73,31 @@ void setup() {
     (void)len;
 
     if (type == WS_EVT_CONNECT) {
-      webSocket.textAll("new client connected");
       client->setCloseClientOnQueueFull(false);
-
     } else if (type == WS_EVT_DISCONNECT) {
-      webSocket.textAll("client disconnected");
 
     } else if (type == WS_EVT_ERROR) {
 
     } else if (type == WS_EVT_PONG) {
 
     } else if (type == WS_EVT_DATA) {
-      constant_boning = ((float)data[0]) / 255.0f;
-      // motorL.setCurrent(((float)data[0]) / 255.0f * 3.0f);
-      // motorR.setCurrent(-((float)data[1]) / 255.0f * 3.0f);
+      switch(data[0]) {
+        case LQR_MSG:
+          if (len == 1 + 10 * sizeof(float)) {
+            memcpy(Model.K_lqr.data(), data + 1, 10 * sizeof(float));
+          }
+          break;
+        case BONING_MSG:
+          if (len == 1 + sizeof(float)) {
+            boning_constant = ((float*) (data + 1))[0];
+          }
+          break;
+        case R_COEFF_MSG:
+          if (len == 1 + sizeof(float)) {
+            r_coeff = ((float*) (data + 1))[0];
+          }
+          break;
+      }
     }
   });
 
@@ -175,8 +194,8 @@ void loop() {
 
   Model.u_prev << tau_refL, tau_refR;
 
-  motorL.setCurrent(-tau_refL * constant_boning);
-  motorR.setCurrent(tau_refR * constant_boning * r_constant);
+  motorL.setCurrent(-tau_refL * boning_constant);
+  motorR.setCurrent(tau_refR * boning_constant * r_coeff);
 
   // return;
   // Serial.println(angle * 100.0f);
