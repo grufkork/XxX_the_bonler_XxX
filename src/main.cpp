@@ -37,6 +37,13 @@ float angle_offset = 0.07f;
 #define LQR_MSG 0x01
 #define BONING_MSG 0x02
 #define R_COEFF_MSG 0x03
+float M = 4;            // Bonler maass
+float m = 2.9;          // Wheel mass
+float Jb = pow(10,-3);  // body inertia
+float Jw = pow(10,-3);  // Wheel inertia
+float g = 9.82;
+float l = 0.05;         // body COM length from wheel axis
+float r = 0.085;        // Wheel radius
 
 void setup() {
   Model.K_lqr <<
@@ -60,6 +67,20 @@ void setup() {
   motorR.setSerialPort(&Serial2);
     
 
+  Model.Ac << 0, 0, 1, 0,
+              0, 0, 0, 1,
+              0, -(pow(M,2)*g*pow(l,2)*pow(r,2))/(2*Jb*Jw + 2*Jw*M*pow(l,2) + Jb*M*pow(r,2) + 2*Jb*m*pow(r,2) + 2*M*pow(l,2)*m*pow(r,2)), 0, 0,
+              0, (M*l*(2*Jw*g + 2*g*m*pow(r,2) + M*g*pow(r,2)))/(2*Jb*Jw + 2*Jw*M*pow(l,2) + Jb*M*pow(r,2) + 2*Jb*m*pow(r,2) + 2*M*pow(l,2)*m*pow(r,2)), 0, 0;
+
+
+  Model.Bc << 0, 0,
+              0, 0,
+              (r*(M*pow(l,2) + Jb))/(2*Jb*Jw + 2*Jw*M*pow(l,2) + Jb*M*pow(r,2) + 2*Jb*m*pow(r,2) + 2*M*pow(l,2)*m*pow(r,2)), (r*(M*pow(l,2) + Jb))/(2*Jb*Jw + 2*Jw*M*pow(l,2) + Jb*M*pow(r,2) + 2*Jb*m*pow(r,2) + 2*M*pow(l,2)*m*pow(r,2)),
+              -(M*l*r)/(2*Jb*Jw + 2*Jw*M*pow(l,2) + Jb*M*pow(r,2) + 2*Jb*m*pow(r,2) + 2*M*pow(l,2)*m*pow(r,2)), -(M*l*r)/(2*Jb*Jw + 2*Jw*M*pow(l,2) + Jb*M*pow(r,2) + 2*Jb*m*pow(r,2) + 2*M*pow(l,2)*m*pow(r,2));
+
+  Model.discretize_state_matricies(); // creates Ad and Bd
+  Model.solveRiccati(); // Creates K_lqr if solution is found
+  
   WiFi.mode(WIFI_AP);
   // Serial.println("Starting AP");
   // WiFi.setTxPower(WIFI_POWER_8_5dBm); 

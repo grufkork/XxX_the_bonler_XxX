@@ -15,7 +15,7 @@ public:
     float Ts = 0.01;    // Sampling time
 
     // Matrices
-    MatrixXf C, Ad, Bd, Kf, I;
+    MatrixXf Ac, Bc, C, Ad, Bd, Kf, I;
     MatrixXf Q, R, P, P_prev, P_pred, S;
     MatrixXf K_lqr;
 
@@ -25,6 +25,8 @@ public:
 
     StateSpaceModel();
     VectorXf kalmanFilter(const VectorXf& y_meas);
+    void discretize_state_matricies();
+    void solveRicatti();
     void resetKalman();
 };
 
