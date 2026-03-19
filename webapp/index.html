@@ -10,8 +10,8 @@
     <input type="range" value = "0" max="1" step = "0.0001" id="speed"> Speed <br>
     <input type="range" value = "0.5" max="1" step = "0.0001" id="dir"> Dir <br>
 
-    <input value = "1.0" id="boning-constant"> Boning constant <br>
-    <input value = "1.0" id="right-coeff"> Right motor coeff <br>
+    <input value = "1.1" id="boning-constant"> Boning constant <br>
+    <input value = "1.4" id="right-coeff"> Right motor coeff <br>
 
     <textarea id="lqr-coeffs"></textarea>
     <button onclick="submit_lqr()">Update LQR</button>
@@ -21,10 +21,18 @@
     <button onclick="set_running(true)" class="bigbutton">ON</button>
     <button onclick="set_running(false)" class="bigbutton">OFF</button>
 
+    <br><br>
+    <textarea id="log"></textarea>
+
     <style>
         .bigbutton{
             width: 10em;
             height: 5em;
+        }
+
+        #log{
+            width: 20em;
+            height: 20em;
         }
     </style>
 </body>

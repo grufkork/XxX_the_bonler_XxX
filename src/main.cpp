@@ -8,7 +8,6 @@
 #include <VescUart.h>
 
 #include "eigenModel.h"
-#include "functions.h"
 
 // En motor väger 2.9kg
 // Hela väger 10.69kg
@@ -30,8 +29,9 @@ float WHEEL_CIRCUMFERENCE = 2.0f * PI * WHEEL_RADIUS;
 void ReadMPU();
 
 float boning_constant = 1.1f;
+float brukspatronen = -1.0f;
 float r_coeff = 1.4f;
-float angle_offset = 0.07f;
+float angle_offset = -0.13f; // Enter the value when bonler is straight
 
 
 #define LQR_MSG 0x01
@@ -40,6 +40,7 @@ float angle_offset = 0.07f;
 #define LQR_PARAMS_MSG 0x04
 #define ON_MSG 0x05
 #define OFF_MSG 0x06
+#define CONTROL_INPUT_MSG 0x07
 
 bool running = false;
 
@@ -51,24 +52,27 @@ void log_message(const char* message) {
   }
 }
 
-float M = 4;            // Bonler maass
+float M = 4;            // Bonler mass
 float m = 2.9;          // Wheel mass
-float Jb = pow(10,-3);  // body inertia
-float Jw = pow(10,-3);  // Wheel inertia
+float Jb = 0.003;  // body inertia
+float Jw = 0.01;  // Wheel inertia
 float g = 9.82;
 float l = 0.05;         // body COM length from wheel axis
 float r = 0.085;        // Wheel radius
 
+
+bool initialPosIntitialized = false;
+
+
 void solve_lqr() {
-  // x, theta, x_dot, theta_dot,
-  Model.Qx << 1, 0, 0, 0,
-              0, 10, 0, 0,
-              0, 0, 1, 0,
-              0, 0, 0, 1;
+  float val1 = Model.Qx(0,0);
+  float val2 = Model.Qx(1,1);
+  float val3 = Model.Qx(3,3);
 
+  log_message(&("Values: " + String(val1) + ", " + String(val2) + ", " + String(val3))[0]);
 
-  Model.Qu << 1, 0,
-              0, 1; // Should be the same
+  Model.Qu << 0.1, 0,
+              0, 0.1; // Should be the same
 
   log_message("Solving LQR");
   Model.Ac << 0, 0,                                                                                                                                       1, 0,
@@ -81,6 +85,19 @@ void solve_lqr() {
               0, 0,
               (r*(M*pow(l,2) + Jb))/(2*Jb*Jw + 2*Jw*M*pow(l,2) + Jb*M*pow(r,2) + 2*Jb*m*pow(r,2) + 2*M*pow(l,2)*m*pow(r,2)),  (r*(M*pow(l,2) + Jb))/(2*Jb*Jw + 2*Jw*M*pow(l,2) + Jb*M*pow(r,2) + 2*Jb*m*pow(r,2) + 2*M*pow(l,2)*m*pow(r,2)),
               -(M*l*r)/(2*Jb*Jw + 2*Jw*M*pow(l,2) + Jb*M*pow(r,2) + 2*Jb*m*pow(r,2) + 2*M*pow(l,2)*m*pow(r,2)),               -(M*l*r)/(2*Jb*Jw + 2*Jw*M*pow(l,2) + Jb*M*pow(r,2) + 2*Jb*m*pow(r,2) + 2*M*pow(l,2)*m*pow(r,2));
+  
+  Model.C << 1, 0, 0, 0,
+             0, 1, 0, 0,
+             0, 0, 0, 1;
+
+  Model.Q << 1, 0, 0, 0,
+             0, 1, 0, 0,
+             0, 0, 1, 0,
+             0, 0, 0, 1;
+
+  Model.R << 0.1, 0, 0,
+             0, 0.1, 0,
+             0, 0, 0.1;
 
   log_message("Bc set");
   
@@ -93,6 +110,11 @@ void solve_lqr() {
 
 
 void setup() {
+  // x, theta, x_dot, theta_dot,
+  Model.Qx << 1, 0, 0, 0,
+              0, 50, 0, 0,
+              0, 0, 1, 0,
+              0, 0, 0, 1;
   WiFi.mode(WIFI_AP);
   // Serial.println("Starting AP");
   // WiFi.setTxPower(WIFI_POWER_8_5dBm); 
@@ -157,27 +179,30 @@ void setup() {
           }
           break;
         case LQR_PARAMS_MSG:
-          if (len == 1 + 7 * sizeof(float)) {
+          if (len == 1 + 11 * sizeof(float)) {
             float* params = (float*)(data + 1);
             M = params[0];
             m = params[1];
             Jb = params[2];
             Jw = params[3];
-            l = params[4];
-            g = params[5];
+            g = params[4];
+            l = params[5];
             r = params[6];
+            Model.Qx(0,0) = params[7];
+            Model.Qx(1,1) = params[8];
+            Model.Qx(3,3) = params[9];
+            brukspatronen = params[10];
             solve_lqr();
           }
           break;
         case ON_MSG:
           running = true;
+          Model.resetKalman();
+          initialPosIntitialized = false;
           log_message("Turned on");
           break;
         case OFF_MSG:
-          running = false;
-          motorL.setCurrent(0.0f);
-          motorR.setCurrent(0.0f);
-          log_message("Turned off");
+          Stop();
           break;
       }
     }
@@ -201,6 +226,14 @@ void setup() {
 
 }
 
+void Stop(){
+  running = false;
+  motorL.setCurrent(0.0f);
+  motorR.setCurrent(0.0f);
+  initialPosIntitialized = false;
+  log_message("Turned off");
+}
+
 float t = 0.0f;
 
 float avgWheelSpeedR = 0.0f;
@@ -215,11 +248,22 @@ float lastPos = 0.0f;
 
 float lastAngle = 0.0f;
 
+unsigned long stepPeriodMicros = 10 * 1000;
+
+float initialPos = 0.0;
+
+int loopn = 0;
+
+int num_telemetry_requested = 0;
+
+float throttle = 0.0f;
+float steering = 0.0f;
+unsigned long timeOfLastControlInput = 0;
 
 void loop() {
   unsigned long currentMicros = micros();
-  unsigned long micros_at_next_step = currentMicros + 10000;
-  float dt = (currentMicros - lastMicros) / 1000000.0f;
+  unsigned long micros_at_next_step = currentMicros + stepPeriodMicros;
+  float dt = (currentMicros - lastMicros) / 1'000'000.0f;
   lastMicros = currentMicros;
   // motorL.setDuty(sin(t)* 1.0f);
   // t += 0.001;
@@ -227,18 +271,45 @@ void loop() {
   if (!running) {
     return;
   }
+  // Serial.print(dt * 1000.0f);
   // Serial.print("Time step: ");
-  // Serial.print(dt);
   
   long motorLPos, motorRPos;
 
   // if ( motorL.getVescValues() ) {
   //   motorLPos = motorL.data.tachometer;
   // }
-  if ( motorR.getVescValues() ) {
+
+  if (num_telemetry_requested > 0){
+    if(!motorR.readVescValues()){
+      log_message("Failed to read motor R values");
+      Stop();
+      return;
+    }
+    if(!motorL.readVescValues()){
+      log_message("Failed to read motor L values");
+      Stop();
+      return;
+    }
+    num_telemetry_requested -= 1;
+    motorLPos = motorL.data.tachometer;
     motorRPos = motorR.data.tachometer;
+  }else{
+    log_message("No message available for reading");
   }
-  motorLPos = motorRPos;
+  if (num_telemetry_requested <= 0){
+    motorR.requestVescValues();
+    motorL.requestVescValues();
+    num_telemetry_requested ++;
+  }else{
+    log_message("Message already requested");
+  }
+
+
+  // if ( motorR.getVescValues() ) {
+  //   motorRPos = motorR.data.tachometer * brukspatronen;
+  // }
+  motorRPos = motorLPos;
 
   float rWheelPos = (float)motorRPos / TICKS_PER_REV * WHEEL_CIRCUMFERENCE;
   float lWheelPos = (float)motorLPos / TICKS_PER_REV * WHEEL_CIRCUMFERENCE;
@@ -249,11 +320,17 @@ void loop() {
   rWheelPosLast = rWheelPos;
   lWheelPosLast = lWheelPos;
 
-  avgWheelSpeedL = 0.9f * avgWheelSpeedL + 0.1f * lWheelSpeed;
-  avgWheelSpeedR = 0.9f * avgWheelSpeedR + 0.1f * rWheelSpeed;
+  avgWheelSpeedL = 0.5f * avgWheelSpeedL + 0.5f * lWheelSpeed;
+  avgWheelSpeedR = 0.5f * avgWheelSpeedR + 0.5f * rWheelSpeed;
   
   float pos = (rWheelPos + lWheelPos) / 2.0f;
-  float velocity = (rWheelSpeed + lWheelSpeed) / 2.0f;
+  float velocity = (avgWheelSpeedR + avgWheelSpeedL) / 2.0f;
+  
+  if (!initialPosIntitialized){
+    initialPosIntitialized = true;
+    initialPos = pos;
+  }
+  pos -= initialPos;
   lastPos = pos;
 
   ReadMPU();
@@ -265,27 +342,34 @@ void loop() {
   float gamma = 0.995f;
 
   float angle = gamma * (lastAngle + gyroSpeed * dt) + (1.0f - gamma) * accAngle;
-  lastAngle = angle;
-
-
-
   float angVel = (angle - lastAngle) / dt;
+  angVel = gyroSpeed;
   lastAngle = angle;
 
+  Vector3f measurement = Vector3f(pos, angle, angVel);
+
+  // Vector<float, Model.n> estimatedState = Model.kalmanFilter(measurement);
+  Vector<float, Model.n> estimatedState = Vector4f(pos, angle, velocity, angVel);
   
-  VectorXf state(4);
-  state << pos, angle, velocity, angVel;//, 0.0f;
-  Vector2f tau = -Model.K_lqr * state;
+  // VectorXf state(4);
+  // state << pos, angle, velocity, angVel;//, 0.0f;
+  Vector2f tau = -Model.K_lqr * estimatedState;
 
   float tau_refL = tau(0);
   float tau_refR = tau(1);
   
-  // Serial.println(angle);
+  // Serial.println(pos);
 
   Model.u_prev << tau_refL, tau_refR;
 
-  motorL.setCurrent(-tau_refL * boning_constant);
-  motorR.setCurrent(tau_refR * boning_constant * r_coeff);
+  // motorL.setCurrent(-tau_refL * boning_constant);
+  // motorR.setCurrent(tau_refR * boning_constant * r_coeff);
+  
+  if (loopn % 20 == 0) {
+    log_message(&("Pos: " + String(pos) + ", Angle: " + String(angle))[0]);
+    log_message(&("Time: " + String(dt*1000.0f))[0]);
+  }
+  loopn++;
   
   
   while (micros() < micros_at_next_step) {}

@@ -4,6 +4,7 @@ const R_COEFF_MSG = 0x03;
 const LQR_PARAMS_MSG = 0x04;
 const ON_MSG = 0x05;
 const OFF_MSG = 0x06;
+const CONTROL_INPUT_MSG 0x07;
 
 let socket = new WebSocket("ws://192.168.4.1:80/ws");
 let statusDisplay = document.getElementById("status");
@@ -20,11 +21,15 @@ let param_input = document.getElementById("lqr-params");
 let lqr_params = {
     bonler_mass: 4,
     wheel_mass: 2.9,
-    body_intertia: 1e-3,
-    wheel_inertia: 1e-3,
+    body_intertia: 0.003,
+    wheel_inertia: 0.01,
     g: 9.82,
     com_offset: 0.05,
-    wheel_radius: 0.085
+    wheel_radius: 0.085,
+    q_x: 1,
+    q_theta: 50,
+    q_theta_dot: 1,
+    brukspatronen: -1,
 };
 
 for(let key in lqr_params){
@@ -61,8 +66,12 @@ socket.onopen = (e) => {
     statusDisplay.innerText = "Connected";
 };
 
+const logBox = document.getElementById("log");
+logBox.value = "";
 socket.onmessage = (e) => {
     console.log(e);
+    logBox.value = logBox.value += e.data + "\n";
+    logBox.scrollTop = logBox.scrollHeight;
 };
 
 socket.onclose = (e) => {
@@ -95,6 +104,7 @@ function send_lqr_params(){
         let input = document.getElementById(key);
         values.push(parseFloat(input.value));
     }
+    console.log(values);
     float_msg(LQR_PARAMS_MSG, values);
     console.log("Sent msg");
 }
@@ -111,5 +121,5 @@ boningConstantInput.onchange = () =>{
     float_msg(BONING_MSG, [parseFloat(boningConstantInput.value)]);
 }
 rightCoeffInput.onchange = () =>{
-    float_msg(R_COEFF_MSG, [parseFloat(boningConstantInput.value)]);
+    float_msg(R_COEFF_MSG, [parseFloat(rightCoeffInput.value)]);
 }

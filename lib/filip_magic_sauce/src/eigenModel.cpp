@@ -3,48 +3,55 @@
 
 // ================= Constructor =================
 StateSpaceModel::StateSpaceModel() {
-    Ac.resize(n, n);
-    Bc.resize(n, m);
-    C.resize(p, n);
-    Ad.resize(n, n);
-    Bd.resize(n, m);
-    Kf.resize(n, p);
-    I = MatrixXf::Identity(n, n);
+    // Ac.resize(n, n);
+    // Bc.resize(n, m);
+    // C.resize(p, n);
+    // Ad.resize(n, n);
+    // Bd.resize(n, m);
+    // Kf.resize(n, p);
+    I.setIdentity();// = MatrixXf::Identity(n, n);
 
-    Qx.resize(n, n);
-    Qu.resize(m, m);
-    P.resize(n, n);
-    P_prev.resize(n, n);
-    P_pred.resize(n, n);
-    S.resize(p, p);
+    // Qx.resize(n, n);
+    // Qu.resize(m, m);
+    // P.resize(n, n);
+    // P_prev.resize(n, n);
+    // P_pred.resize(n, n);
+    // S.resize(p, p);
 
-    x.resize(n);
-    x_prev.resize(n);
-    x_pred.resize(n);
-    u_prev.resize(m);
-    v.resize(p);
+    // x.resize(n);
+    // x_prev.resize(n);
+    // x_pred.resize(n);
+    // u_prev.resize(m);
+    // v.resize(p);
 
-    x_ref.resize(n);
-    K_lqr.resize(m, n);
+    // x_ref.resize(n);
+    // K_lqr.resize(m, n);
 
-    C = MatrixXf::Identity(p, n);       // measurement matrix
-    P_prev = 0.01*MatrixXf::Identity(n, n);  // initial covariance
+    C.setZero();
+    // C = MatrixXf::Identity(p, n);       // measurement matrix
+    // P_prev = 0.01*MatrixXf::Identity(n, n);  // initial covariance
+    P_prev = 100.0*I;  // initial covariance
     P = P_prev;
-    x_prev = VectorXf::Zero(n);         // initial state estimate
-    x_pred = VectorXf::Zero(n);
-    u_prev = VectorXf::Zero(m);
-    v = VectorXf::Zero(p);
-    x_ref = VectorXf::Zero(n);
+    x_prev.setZero();         // initial state estimate
+    x_pred.setZero();
+    u_prev.setZero();
+    v.setZero();
+    x_ref.setZero();
+    // x_prev = VectorXf::Zero(n);         // initial state estimate
+    // x_pred = VectorXf::Zero(n);
+    // u_prev = VectorXf::Zero(m);
+    // v = VectorXf::Zero(p);
+    // x_ref = VectorXf::Zero(n);
 }
 
 // ================= Kalman Filter =================
-VectorXf StateSpaceModel::kalmanFilter(const VectorXf& y_meas) {
+Vector<float, Model.n> StateSpaceModel::kalmanFilter(const Vector<float, Model.p>& y_meas) {
     // Prediction
     x_pred = Ad * x_prev + Bd * u_prev;
-    P_pred = Ad * P_prev * Ad.transpose() + Qx; // TODO FIXME: Qx and Qu are not correct
+    P_pred = Ad * P_prev * Ad.transpose() + Q; // TODO FIXME: Qx and Qu are not correct
 
     // Measurement update
-    S = C * P_pred * C.transpose() + Qu;
+    S = C * P_pred * C.transpose() + R;
     Kf = P_pred * C.transpose() * S.inverse();
     v = y_meas - C * x_pred;
 
@@ -61,24 +68,38 @@ VectorXf StateSpaceModel::kalmanFilter(const VectorXf& y_meas) {
 
 // ================= Reset Kalman Filter =================
 void StateSpaceModel::resetKalman() {
-    x_prev = VectorXf::Zero(n);
-    x_pred = VectorXf::Zero(n);
-    x      = VectorXf::Zero(n);
+    x_prev.setZero();
+    x_pred.setZero();
+    x.setZero();
 
-    P_prev = MatrixXf::Identity(n, n);
+    P_prev.setIdentity();
     P_pred = P_prev;
-    P      = P_prev;
+    P = P_prev;
 
-    u_prev = VectorXf::Zero(m);
-    v      = VectorXf::Zero(p);
+    u_prev.setZero();
+    v.setZero();
+
+
+    // x_prev = Vector<float, n>::Zero();
+    // x_pred = Vector<float, n>::Zero();
+    // x      = Vector<float, n>::Zero();
+
+    // P_prev = Matrix<float, n, n>::Identity(n, n);
+    // P_pred = P_prev;
+    // P      = P_prev;
+
+    // u_prev = VectorXf::Zero(m);
+    // v      = VectorXf::Zero(p);
 }
 
 // ================= Discretization and Ricatti =================
 void StateSpaceModel::discretize_state_matricies(){
     // Discretization (Taylor series)
-    MatrixXf Psi = MatrixXf::Zero(n,n);
+    // MatrixXf Psi = MatrixXf::Zero(n,n);
+    // Matrix<float, n, n> Psi;
+    // Psi.setZero();
             
-    Psi = I*Ts + (Ac*(pow(Ts,2) / 2)) + (Ac*Ac*(pow(Ts,3) / 6)) + (Ac*Ac*Ac*(pow(Ts,4) / 24)) + (Ac*Ac*Ac*Ac*(pow(Ts,5) / 120));
+    Matrix<float, n, n> Psi = I*Ts + (Ac*(pow(Ts,2) / 2)) + (Ac*Ac*(pow(Ts,3) / 6)) + (Ac*Ac*Ac*(pow(Ts,4) / 24)) + (Ac*Ac*Ac*Ac*(pow(Ts,5) / 120));
     Ad = I + Ac*Psi;
     Bd = Psi*Bc;
 }
@@ -90,7 +111,9 @@ void StateSpaceModel::solveRicatti() {
     // The LQR gain L will be zero, preventing state based input.
 
     // Solve Discrete-time Algebraic Riccati Equation (DARE)
-    MatrixXf P_tmp = MatrixXf::Zero(n, n);
+    // MatrixXf P_tmp = MatrixXf::Zero(n, n);
+    Matrix<float, n, n> P_tmp;
+    P_tmp.setZero();
     float tolerance = 0.005;
     int max_iterations = 1000;
     int i = 0;
