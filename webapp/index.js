@@ -4,7 +4,7 @@ const R_COEFF_MSG = 0x03;
 const LQR_PARAMS_MSG = 0x04;
 const ON_MSG = 0x05;
 const OFF_MSG = 0x06;
-const CONTROL_INPUT_MSG 0x07;
+const CONTROL_INPUT_MSG = 0x07;
 
 let socket = new WebSocket("ws://192.168.4.1:80/ws");
 let statusDisplay = document.getElementById("status");
@@ -12,24 +12,28 @@ statusDisplay.innerText = "Connecting...";
 
 let speed = document.getElementById("speed");
 let dir = document.getElementById("dir");
-let boningConstantInput = document.getElementById("boning-constant");
-let rightCoeffInput = document.getElementById("right-coeff");
+// let boningConstantInput = document.getElementById("boning-constant");
+// let rightCoeffInput = document.getElementById("right-coeff");
 
 let param_input = document.getElementById("lqr-params");
 
 
 let lqr_params = {
-    bonler_mass: 4,
-    wheel_mass: 2.9,
-    body_intertia: 0.003,
-    wheel_inertia: 0.01,
-    g: 9.82,
-    com_offset: 0.05,
-    wheel_radius: 0.085,
-    q_x: 1,
-    q_theta: 50,
-    q_theta_dot: 1,
-    brukspatronen: -1,
+    bonler_mass: 4, // 0
+    wheel_mass: 2.9, // 1
+    body_intertia: 0.003, // 2
+    wheel_inertia: 0.01, // 3
+    g: 9.82, // 4
+    com_offset: 0.05, // 5
+    wheel_radius: 0.085, // 6
+    current_gain: 1.1, // 7
+    tachometer_sign: 1.0, // 8
+    accelerometer_sign: 1.0, // 9
+    r_coeff: 1.4, // 10
+    q_x: 1, // 11
+    q_theta: 1, // 12
+    q_x_dot: 1, // 13
+    q_theta_dot: 1, // 14
 };
 
 for(let key in lqr_params){
@@ -115,11 +119,4 @@ function set_running(state){
     } else {
         socket.send(new Uint8Array([OFF_MSG]));
     }
-}
-
-boningConstantInput.onchange = () =>{
-    float_msg(BONING_MSG, [parseFloat(boningConstantInput.value)]);
-}
-rightCoeffInput.onchange = () =>{
-    float_msg(R_COEFF_MSG, [parseFloat(rightCoeffInput.value)]);
 }
