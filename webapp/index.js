@@ -1,6 +1,6 @@
-const LQR_MSG = 0x01;
-const BONING_MSG = 0x02;
-const R_COEFF_MSG = 0x03;
+const UNUSED0 = 0x01;
+const UNUSED1 = 0x02;
+const UNUSED2 = 0x03;
 const LQR_PARAMS_MSG = 0x04;
 const ON_MSG = 0x05;
 const OFF_MSG = 0x06;
@@ -12,28 +12,28 @@ statusDisplay.innerText = "Connecting...";
 
 let speed = document.getElementById("speed");
 let dir = document.getElementById("dir");
-// let boningConstantInput = document.getElementById("boning-constant");
-// let rightCoeffInput = document.getElementById("right-coeff");
 
 let param_input = document.getElementById("lqr-params");
 
 
 let lqr_params = {
-    bonler_mass: 4, // 0
+    bonler_mass: 4.9, // 0
     wheel_mass: 2.9, // 1
-    body_intertia: 0.003, // 2
-    wheel_inertia: 0.01, // 3
+    body_intertia: 0.008, // 2
+    wheel_inertia: 0.02, // 3
     g: 9.82, // 4
-    com_offset: 0.05, // 5
+    com_offset: 0.3, // 5
     wheel_radius: 0.085, // 6
     current_gain: 1.1, // 7
     tachometer_sign: 1.0, // 8
     accelerometer_sign: 1.0, // 9
     r_coeff: 1.4, // 10
-    q_x: 1, // 11
+    q_x: 5, // 11
     q_theta: 1, // 12
     q_x_dot: 1, // 13
     q_theta_dot: 1, // 14
+    Kp: 2.0,
+    Kw: 0.8
 };
 
 for(let key in lqr_params){
@@ -96,12 +96,6 @@ dir.oninput = () => {
 
 };
 
-function submit_lqr(){
-    let txt = document.getElementById("lqr-coeffs").value;
-    let split = txt.split(",");
-    let coeffs = split.map(x => parseFloat(x));
-}
-
 function send_lqr_params(){
     let values = [];
     for(let key in lqr_params){
@@ -120,3 +114,69 @@ function set_running(state){
         socket.send(new Uint8Array([OFF_MSG]));
     }
 }
+
+const touchinput = document.getElementById("touchinput");
+const marker = document.getElementById("marker");
+
+let touchx = 0;
+let touchy = 0;
+let touched = false;
+
+
+let last_pos = [0,0];
+let integrated_pos = [0,0];
+
+function getXY(e){
+    let rect = e.target.getClientRects()[0];
+    let x = e.x - rect.x;
+    let y = e.y - rect.y;
+    let xnorm = x / rect.width;
+    let ynorm = 1 - y / rect.height;
+
+    let pos = [xnorm * 2 - 1,ynorm * 2 - 1];
+    integrated_pos[0] += pos[0] - last_pos[0];
+    integrated_pos[1] += pos[1] - last_pos[1];
+    last_pos = pos;
+
+    integrated_pos[0] = Math.max(-1, Math.min(1, integrated_pos[0]));
+    integrated_pos[1] = Math.max(-1, Math.min(1, integrated_pos[1]));
+
+    return integrated_pos;
+}
+
+function send_input(input){
+    console.log(input);
+    marker.style.left = (input[0] + 1) / 2 * 100 + "%";
+    marker.style.top = (1-(input[1] + 1) / 2) * 100+ "%";
+    socket.send(float_msg(CONTROL_INPUT_MSG, [input[1], input[0]]));
+}
+
+
+touchinput.addEventListener("pointerdown", (e) => {
+    e.preventDefault();
+    touched = true;
+    getXY(e);
+    integrated_pos=[0,0];
+    // let pos = getXY(e);
+    // send_input(pos);
+});
+
+touchinput.addEventListener("pointermove", (e) => {
+    if(!touched) return;
+    e.preventDefault();
+    let pos = getXY(e);
+    send_input(pos);
+});
+
+touchinput.addEventListener("pointerup", (e) => {
+    e.preventDefault();
+    touched = false;
+    integrated_pos = [0,0];
+    send_input([0,0]);
+});
+
+document.body.addEventListener("pointerup", (e) => {
+    touched = false;
+    integrated_pos = [0,0];
+    send_input([0,0]);
+});

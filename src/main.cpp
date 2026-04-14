@@ -34,16 +34,21 @@ float accelerometer_sign = 1.0f;
 float r_coeff = 1.4f;
 float angle_offset = -0.13f; // Enter the value when bonler is straight
 
+const float MAX_ANGLE = 20.0f * DEG_TO_RAD;
 
-#define LQR_MSG 0x01
-#define BONING_MSG 0x02
-#define R_COEFF_MSG 0x03
+
+#define UNUSED0 0x01
+#define UNUSED1 0x02
+#define UNUSED2 0x03
 #define LQR_PARAMS_MSG 0x04
 #define ON_MSG 0x05
 #define OFF_MSG 0x06
 #define CONTROL_INPUT_MSG 0x07
 
 volatile bool running = false;
+
+volatile float throttle = 0.0f;
+volatile float steering = 0.0f;
 
 void Stop();
 void Reset();
@@ -56,17 +61,19 @@ void log_message(const char* message) {
   }
 }
 
-float M = 4;            // Bonler mass
+float M = 5.4;            // Bonler mass
 float m = 2.9;          // Wheel mass
-float Jb = 0.003;  // body inertia
-float Jw = 0.01;  // Wheel inertia
+float Jb = 1.62;  // Body inertia
+float Jw = 0.02;  // Wheel inertia
 float g = 9.82;
-float l = 0.05;         // body COM length from wheel axis
+float l = 0.207;         // body COM length from wheel axis
 float r = 0.085;        // Wheel radius
 
 
 volatile bool runningInitialised = false;
 
+float Kp = 2.0f;
+float Kw = 0.8f;
 
 void solve_lqr() {
 
@@ -110,7 +117,7 @@ void solve_lqr() {
 
 void setup() {
   // x, theta, x_dot, theta_dot,
-  Model.Qx << 1, 0, 0, 0,
+  Model.Qx << 5, 0, 0, 0,
               0, 1, 0, 0,
               0, 0, 1, 0,
               0, 0, 0, 1;
@@ -162,23 +169,8 @@ void setup() {
 
     } else if (type == WS_EVT_DATA) {
       switch(data[0]) {
-        case LQR_MSG:
-          if (len == 1 + 10 * sizeof(float)) {
-            memcpy(Model.K_lqr.data(), data + 1, 10 * sizeof(float));
-          }
-          break;
-        case BONING_MSG:
-          if (len == 1 + sizeof(float)) {
-            current_gain = ((float*) (data + 1))[0];
-          }
-          break;
-        case R_COEFF_MSG:
-          if (len == 1 + sizeof(float)) {
-            r_coeff = ((float*) (data + 1))[0];
-          }
-          break;
         case LQR_PARAMS_MSG:
-          if (len == 1 + 15 * sizeof(float)) {
+          if (len == 1 + 17 * sizeof(float)) {
             float* params = (float*)(data + 1);
             M = params[0];
             m = params[1];
@@ -195,6 +187,9 @@ void setup() {
             Model.Qx(1,1) = params[12];
             Model.Qx(2,2) = params[13];
             Model.Qx(3,3) = params[14];
+            Kp = params[15];
+            Kw = params[16];
+            
             log_message("Ack, solving LQR");
             solve_lqr();
           }
@@ -208,6 +203,13 @@ void setup() {
           break;
         case OFF_MSG:
           Stop();
+          break;
+        case CONTROL_INPUT_MSG:
+          if(len == 1 + 2*sizeof(float)){
+            float* in = (float*)(data + 1);
+            throttle = in[0];
+            steering = in[1];
+          }
           break;
       }
     }
@@ -236,6 +238,7 @@ void Stop(){
 
 void Reset(){
   runningInitialised = false;
+  Model.x_ref = Model.x_ref.setZero();
   log_message("Reset");
 }
 
@@ -253,6 +256,8 @@ float lastPos = 0.0f;
 
 float lastAngle = 0.0f;
 
+float yawAngle = 0.0f;
+
 unsigned long stepPeriodMicros = 10 * 1000;
 
 long initialMotorLPos, initialMotorRPos = 0;
@@ -261,11 +266,7 @@ int loopn = 0;
 
 int num_telemetry_requested = 0;
 
-float throttle = 0.0f;
-float steering = 0.0f;
 unsigned long timeOfLastControlInput = 0;
-
-
 
 void loop() {
   unsigned long currentMicros = micros();
@@ -285,6 +286,7 @@ void loop() {
     loopn = 0;
     avgWheelSpeedL = 0.0f;
     avgWheelSpeedR = 0.0f;
+    yawAngle = 0.0f;
   }
   
   // Serial.print(dt * 1000.0f);
@@ -329,7 +331,7 @@ void loop() {
       return;
     }
     num_telemetry_requested -= 1;
-    motorLPos = -motorL.data.tachometer * tachometer_sign;
+    motorLPos = motorL.data.tachometer * tachometer_sign;
     motorRPos = motorR.data.tachometer * tachometer_sign;
     if (justStarted){
       initialMotorLPos = motorLPos;
@@ -372,6 +374,12 @@ void loop() {
   float pos = (rWheelPos + lWheelPos) / 2.0f;
   float velocity = (avgWheelSpeedR + avgWheelSpeedL) / 2.0f;
   
+  if(abs(velocity) > 1.0f) {
+    Stop();
+    log_message("!!! Velocity too high, stopping !!!");
+    return;
+  }
+  
   ReadMPU();
   
   float accAngle = atan2f((float)AcY, (float)AcZ) - angle_offset;
@@ -381,6 +389,20 @@ void loop() {
   float gamma = 0.995f;
   
   float angle = (gamma * (lastAngle + gyroSpeed * dt) + (1.0f - gamma) * accAngle)*accelerometer_sign;
+  if(abs(angle) > MAX_ANGLE) {
+    Stop();
+    log_message("!!! Angle too steep, stopping !!!");
+    return;
+  }
+
+  // Yaw controller
+  float yawRate = (float)GyZ / 131.0f * DEG_TO_RAD;
+  yawAngle += yawRate * dt;
+
+  yawAngle += steering * dt;
+  Model.x_ref[0] += throttle * dt;
+
+  float yawControl = Kp * yawAngle + Kw * yawRate;
   
   if (justStarted){
     angle = 0.0f;
@@ -391,17 +413,17 @@ void loop() {
   lastAngle = angle;
 
   // Vector<float, Model.n> estimatedState = Model.kalmanFilter(measurement);
-  Vector<float, Model.n> estimatedState = Vector4f(pos, angle, velocity, angVel);
+  Vector<float, Model.n> estimatedState = Vector4f(pos, angle, velocity, angVel) - Model.x_ref;
   
   Vector2f tau = -Model.K_lqr * estimatedState;
 
-  float tau_refL = tau(0);
-  float tau_refR = tau(1);
+  float tau_refL = tau(0) + yawControl;
+  float tau_refR = tau(1) - yawControl;
   
 
   Model.u_prev << tau_refL, tau_refR;// TODO Reset this as well when Kalman is used
 
-  motorL.setCurrent(-tau_refL * current_gain);
+  motorL.setCurrent(tau_refL * current_gain);
   motorR.setCurrent(tau_refR * current_gain * r_coeff);
   
   if (loopn % 25 == 0) {
