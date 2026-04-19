@@ -2,7 +2,7 @@
 #include <AsyncTCP.h>
 #include <WiFi.h>
 #include <Wire.h>
-
+#include "littleFS.h"
 #include <ESPAsyncWebServer.h>
 
 #include <VescUart.h>
@@ -133,6 +133,12 @@ void setup() {
   // Serial.println("Starting AP");
   // WiFi.setTxPower(WIFI_POWER_8_5dBm); 
   WiFi.softAP("pro-bono", "ihardlyknowher");
+    if(!LittleFS.begin(true)){
+    Serial.println("File mount failed");
+    return;
+  }
+  
+
   // Serial.println("Is ok?");
   // Model.K_lqr <<
   //   -1.39734, -13.3706, -1.48825, -0.981489, -0.551298,
@@ -232,7 +238,8 @@ void setup() {
   });*/
 
   server.addHandler(&webSocket);
-
+  server.serveStatic("/", LittleFS, "/").setDefaultFile("index.html");
+  
   server.begin();
 }
 
