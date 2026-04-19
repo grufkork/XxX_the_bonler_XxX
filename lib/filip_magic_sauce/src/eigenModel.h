@@ -11,7 +11,7 @@ public:
     // System dimensions (default)
     static const int n = 4;          // Number of states
     static const int m = 2;          // Number of inputs
-    static const int p = 3;          // Number of outputs
+    static const int p = 4;          // Number of outputs
     float Ts = 0.015;    // Sampling time
 
     // Matrices

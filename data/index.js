@@ -43,9 +43,9 @@ for(let i = 0; i < telemetry_channel_count; i++){
 }
 
 let lqr_params = {
-    bonler_mass: 4.9, // 0
+    bonler_mass: 5.4, // 0
     wheel_mass: 2.9, // 1
-    body_intertia: 0.008, // 2
+    body_intertia: 0.2, // 2
     wheel_inertia: 0.02, // 3
     g: 9.82, // 4
     com_offset: 0.3, // 5
@@ -59,20 +59,32 @@ let lqr_params = {
     q_x_dot: 1, // 13
     q_theta_dot: 1, // 14
     Kp: 2.0,
-    Kw: 0.8
+    Kw: 0.8,
+    Q_matrix_scalar: 1.0,
+    angVelSmoothing: 0.7,
+    compFilter: 0.99,
+    accSmoothing: 0.7,
+    useKalman: 0,
+    tauFilter: 0.6
 };
 
 for(let key in lqr_params){
+    let row = document.createElement("div");
+    row.className = "param-row";
+
     let input = document.createElement("input");
     input.type = "number";
     input.value = lqr_params[key];
     input.id = key;
     input.style.width = "5em";
+
     let label = document.createElement("span");
     label.innerText = " " + key;
-    param_input.appendChild(input);
-    param_input.appendChild(label);
-    param_input.appendChild(document.createElement("br"));
+
+    row.appendChild(input);
+    row.appendChild(label);
+    param_input.appendChild(row);
+
 }
 
 
@@ -86,25 +98,57 @@ function float_msg(msg_type, floats){
     payload.set(floats_to_bytes(floats), 1);
     console.log("Sending", payload);
     socket.send(payload);
-    console.log("Sent");
 }
 
 function redraw_telemetry(){
+    let dataPointCount = ctxs[0].canvas.width;
+    let start_idx = Math.max(0, telemetry[0].length - dataPointCount);
     for(let i = 0; i < telemetry_channel_count; i++){
         let ctx = ctxs[i];
         let data = telemetry[i];
         let max = Math.max(...data);
         let min = Math.min(...data);
         ctx.clearRect(0,0,ctx.canvas.width, ctx.canvas.height);
+        ctx.font = "16px Monospace";
+        ctx.fillText(telemetry_channels[i], 3, 15);
         ctx.beginPath();
         ctx.moveTo(0,0);
-        for(let n = 0; n < data.length; n++){
-            ctx.lineTo(n, (data[n] - min) / (max - min) * ctx.canvas.height);
+        for(let n = 0; n < dataPointCount; n++){
+            ctx.lineTo(n, (data[n + start_idx] - min) / (max - min) * ctx.canvas.height);
         }
         ctx.stroke();
     }
 }
 
+function clear_telemetry(){
+    for(let i = 0; i < telemetry_channel_count; i++){
+        telemetry[i] = [];
+    }
+}
+
+function save_telemetry(){
+    let content = "";
+    for(let i = 0; i < telemetry_channel_count; i++){
+        content += telemetry_channels[i] + ";";
+    }
+    content += "\n";
+    for(let i = 0; i < telemetry[0].length; i++){
+        for(let n = 0; n < telemetry_channel_count; n++){
+            content += telemetry[n][i] + ";";
+        }
+        content += "\n";
+    }
+
+    let blob = new Blob([content], {type: "text/csv"});
+    let a = document.createElement("a");
+    let file = URL.createObjectURL(blob);
+    a.href = file;
+    a.download = "telemetry.csv";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(file);
+}
 
 
 socket.onopen = (e) => {
@@ -131,11 +175,11 @@ socket.onmessage = (e) => {
         for(let i = 0; i < floats.length; i++){
             telemetry[i%telemetry_channel_count].push(floats[i]);
         }
-        for(let i = 0; i < telemetry_channel_count; i++){
-            let to_remove = Math.max(0, telemetry[i].length - ctxs[i].canvas.width);
-            console.log(to_remove);
-            telemetry[i] = telemetry[i].slice(to_remove);
-        }
+        // for(let i = 0; i < telemetry_channel_count; i++){
+        //     let to_remove = Math.max(0, telemetry[i].length - ctxs[i].canvas.width);
+        //     console.log(to_remove);
+        //     telemetry[i] = telemetry[i].slice(to_remove);
+        // }
         redraw_telemetry();
     }
 };
@@ -242,3 +286,5 @@ document.body.addEventListener("pointerup", (e) => {
     integrated_pos = [0,0];
     send_input([0,0]);
 });
+
+redraw_telemetry();

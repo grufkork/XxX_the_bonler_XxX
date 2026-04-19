@@ -1,3 +1,6 @@
+// TODO: kalman gör skillnad. vi kan ta bort funktionen att stänga av/på kalman filter
+// TODO: byt alla lowpass till klass-implementationen om lämpligt
+
 #include <Arduino.h>
 #include <AsyncTCP.h>
 #include <WiFi.h>
@@ -38,7 +41,7 @@ const float MAX_ANGLE = 20.0f * DEG_TO_RAD;
 
 
 #define UNUSED0 0x01
-#define UNUSED1 0x02
+#define UNUSED1 0x02  
 #define UNUSED2 0x03
 #define LQR_PARAMS_MSG 0x04
 #define ON_MSG 0x05
@@ -77,11 +80,48 @@ float g = 9.82;
 float l = 0.207;         // body COM length from wheel axis
 float r = 0.085;        // Wheel radius
 
+float Q = 1.0;
+
+class lowPassFilter {
+public:
+  float alpha_;
+// alpha is the weight of the previous value, higher is smoother at rhe cost of responsiveness
+  lowPassFilter(float alpha){
+    alpha_ = alpha;
+    prev_value_ = 0; // Initialize previous value
+  }
+
+  float update(float value) {
+    float filtered_value = (1 - alpha_) * value + alpha_ * prev_value_;
+    prev_value_ = filtered_value;
+    return filtered_value;
+    }
+
+  void setAlpha(float value){
+    alpha_ = value;
+  }
+
+private:
+  float prev_value_; // Previous value
+
+};
+
+
+
+float angVelSmoothing = 0.7f;
+float accelerometerSmoothing = 0.7F;
+float compFilter = 0.99f;
+
+lowPassFilter tauFilterR(0.5);
+lowPassFilter tauFilterL(0.5);
 
 volatile bool runningInitialised = false;
 
+bool useKalman = true;
+
 float Kp = 2.0f;
 float Kw = 0.8f;
+
 
 void solve_lqr() {
 
@@ -102,16 +142,9 @@ void solve_lqr() {
   
   Model.C << 1, 0, 0, 0,
              0, 1, 0, 0,
-             0, 0, 0, 1;
-
-  Model.Q << 1, 0, 0, 0,
-             0, 1, 0, 0,
              0, 0, 1, 0,
              0, 0, 0, 1;
 
-  Model.R << 0.1, 0, 0,
-             0, 0.1, 0,
-             0, 0, 0.1;
 
   log_message("Bc set");
   
@@ -123,8 +156,32 @@ void solve_lqr() {
 
 
 
+
+
 void setup() {
   // x, theta, x_dot, theta_dot,
+  Model.Q << 1, 0, 0, 0,
+             0, 1, 0, 0,
+             0, 0, 1, 0,
+             0, 0, 0, 1;
+
+  Model.R << 0.1, 0, 0, 0,
+             0, 0.001, 0, 0,
+             0, 0, 0.1, 0,
+             0, 0, 0, 0.001;
+
+ //these are initial values for the Kalman filter and do probably not need changing.  
+  Model.P_prev << 0.01, 0, 0, 0,
+                  0, 0.01, 0, 0,
+                  0, 0, 0.01, 0,
+                  0, 0, 0, 0.01;
+
+  Model.x_prev << 0, 0, 0, 0;
+
+  Model.u_prev << 0, 0;
+
+
+  
   Model.Qx << 5, 0, 0, 0,
               0, 1, 0, 0,
               0, 0, 1, 0,
@@ -184,7 +241,7 @@ void setup() {
     } else if (type == WS_EVT_DATA) {
       switch(data[0]) {
         case LQR_PARAMS_MSG:
-          if (len == 1 + 17 * sizeof(float)) {
+          if (len == 1 + 23 * sizeof(float)) {  // you should as many as you have parameters. remember, zero-indexed.
             float* params = (float*)(data + 1);
             M = params[0];
             m = params[1];
@@ -203,7 +260,18 @@ void setup() {
             Model.Qx(3,3) = params[14];
             Kp = params[15];
             Kw = params[16];
-            
+            Model.Q(0,0) = params[17];
+            Model.Q(1,1) = params[17];
+            Model.Q(2,2) = params[17];
+            Model.Q(3,3) = params[17];
+            angVelSmoothing = params[18];
+            compFilter = params[19];
+            accelerometerSmoothing = params[20];
+            useKalman = params[21] >= 1 ? true:false;
+            tauFilterL.setAlpha(params[22]);
+            tauFilterR.setAlpha(params[22]);
+            //log_message(("Q value received: " + String(params[17])).c_str());
+        
             log_message("Ack, solving LQR");
             solve_lqr();
           }
@@ -268,8 +336,10 @@ float lWheelPosLast = 0.0f;
 unsigned long lastMicros = 0;
 
 float lastPos = 0.0f;
-
 float lastAngle = 0.0f;
+float lastAngVel = 0.0f;
+float lastAccAngle = 0.0f;
+
 
 float yawAngle = 0.0f;
 
@@ -389,7 +459,7 @@ void loop() {
   float pos = (rWheelPos + lWheelPos) / 2.0f;
   float velocity = (avgWheelSpeedR + avgWheelSpeedL) / 2.0f;
   
-  if(abs(velocity) > 1.0f) {
+  if(abs(velocity) > 1.5f) {
     Stop();
     log_message("!!! Velocity too high, stopping !!!");
     return;
@@ -397,25 +467,43 @@ void loop() {
   
   ReadMPU();
   
-  float accAngle = atan2f((float)AcY, (float)AcZ) - angle_offset;
+  float accelerometer = atan2f((float)AcX, (float)AcZ) - angle_offset;
+  float accAngle = lastAccAngle * accelerometerSmoothing + accelerometer * (1.0f - angVelSmoothing);
 
-  float gyroSpeed = (float)GyX / 131.0f * DEG_TO_RAD;
+  float gyroSpeed = -(float)GyY / 131.0f * DEG_TO_RAD;
+  float angVel = lastAngVel * angVelSmoothing + gyroSpeed * (1.0f - angVelSmoothing);
   
-  float gamma = 0.995f;
-  
-  float angle = (gamma * (lastAngle + gyroSpeed * dt) + (1.0f - gamma) * accAngle)*accelerometer_sign;
+ 
+  float angle = (compFilter * (lastAngle + angVel * dt) + (1.0f - compFilter) * accAngle)*accelerometer_sign;
   if(abs(angle) > MAX_ANGLE) {
     Stop();
     log_message("!!! Angle too steep, stopping !!!");
     return;
   }
 
+  lastAngle = angle;
+  lastAngVel = angVel;
+
   // Yaw controller
   float yawRate = (float)GyZ / 131.0f * DEG_TO_RAD;
   yawAngle += yawRate * dt;
 
+  const float maxThrottleStep = 0.01f;
+  static float limitedThrottle = 0.0f;
+  float delta = throttle - limitedThrottle;
+
+  if (delta > maxThrottleStep) delta = maxThrottleStep;
+  if (delta < -maxThrottleStep) delta = -maxThrottleStep;
+
+  limitedThrottle += delta;
+
+
   yawAngle += steering * dt;
-  Model.x_ref[0] += throttle * dt;
+  Model.x_ref[0] += limitedThrottle * dt;
+  Model.x_ref[2] = limitedThrottle*0.5;
+
+
+
 
   float yawControl = Kp * yawAngle + Kw * yawRate;
   
@@ -424,20 +512,36 @@ void loop() {
   }
 
   // float angVel = (angle - lastAngle) / dt;
-  float angVel = gyroSpeed;
-  lastAngle = angle;
-
-  // Vector<float, Model.n> estimatedState = Model.kalmanFilter(measurement);
-  Vector<float, Model.n> estimatedState = Vector4f(pos, angle, velocity, angVel) - Model.x_ref;
   
+  Vector<float, Model.n> measurement = Vector4f(pos, angle, velocity, angVel);
+  Vector<float, Model.n> estimatedStateKalman = Model.kalmanFilter(measurement) - Model.x_ref;
+  Vector<float, Model.n> estimatedState = measurement - Model.x_ref;
+
   Vector2f tau = -Model.K_lqr * estimatedState;
+  Vector2f tau_kalman = -Model.K_lqr * estimatedStateKalman; 
 
-  float tau_refL = tau(0) + yawControl;
-  float tau_refR = tau(1) - yawControl;
+  Model.u_prev = tau_kalman;
+  float tau_refL = tau_kalman(0) + yawControl;
+  float tau_refR = tau_kalman(1) - yawControl;
+
+  tau_refL = tauFilterL.update(tau_refL);
+  tau_refR = tauFilterR.update(tau_refR);
+
+  
+  if(!useKalman){
+    Model.u_prev = tau;
+    tau_refL = tau(0) + yawControl;
+    tau_refR = tau(1) - yawControl;
+  }
+
+  //these are here for plotting. they will be removed, mmkay?
+  float tau_refL_kalman = tau_kalman(0) + yawControl;
+  float tau_refR_kalman = tau_kalman(1) - yawControl;
+
+
   
 
-  Model.u_prev << tau_refL, tau_refR;// TODO Reset this as well when Kalman is used
-
+  if(!running) return;
   motorL.setCurrent(tau_refL * current_gain);
   motorR.setCurrent(tau_refR * current_gain * r_coeff);
   
@@ -448,7 +552,7 @@ void loop() {
   add_telemetry(tau_refL);
   add_telemetry(tau_refR);
 
-  if(telemetry_index >= 500){
+  if(telemetry_index >= 200){
     webSocket.binary(latest_client->id(), (uint8_t*)telemetry, telemetry_index * sizeof(float));
     telemetry_index = 0;
   }
@@ -456,6 +560,8 @@ void loop() {
   if (loopn % 25 == 0) {
     log_message(&("Pos: " + String(pos) + ", Ang: " + String(angle) + ", Vel: " + String(velocity) + ", Angvel: " + String(angVel))[0]);
     log_message(&("Tau: " + String(tau_refL) + ", " + String(tau_refR))[0]);
+    log_message(&("Kal: " + String(tau_refL_kalman) + ", " + String(tau_refR_kalman))[0]);
+  
     // log_message(&("Time: " + String(dt*1000.0f))[0]);
   }
   loopn++;
