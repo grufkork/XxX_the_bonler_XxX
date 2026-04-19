@@ -7,6 +7,7 @@ const OFF_MSG = 0x06;
 const CONTROL_INPUT_MSG = 0x07;
 
 let socket = new WebSocket("ws://192.168.4.1:80/ws");
+socket.binaryType="arraybuffer";
 let statusDisplay = document.getElementById("status");
 statusDisplay.innerText = "Connecting...";
 
@@ -15,6 +16,31 @@ let dir = document.getElementById("dir");
 
 let param_input = document.getElementById("lqr-params");
 
+
+let telemetry_channels = ["Pos", "Ang", "Vel", "AngVel", "TauL", "RauR"];
+let telemetry_channel_count = telemetry_channels.length;
+let ctxs = [];
+let canvases = [];
+
+const telemetrydiv = document.getElementById("telemetry");
+for(let i = 0; i < telemetry_channel_count; i++){
+    let canvas = document.createElement("canvas");
+
+    telemetrydiv.appendChild(canvas);
+    telemetrydiv.appendChild(document.createElement("br"));
+
+    canvas.style.width = "100%";
+    canvas.style.height = "10em";
+    canvas.width = canvas.clientWidth;
+    canvas.height = canvas.clientHeight;
+    let ctx = canvas.getContext("2d");
+
+    console.log(canvas.clientHeight);
+    console.log(canvas.clientWidth);
+
+    ctxs.push(ctx);
+    canvases.push(ctx);
+}
 
 let lqr_params = {
     bonler_mass: 4.9, // 0
@@ -63,6 +89,22 @@ function float_msg(msg_type, floats){
     console.log("Sent");
 }
 
+function redraw_telemetry(){
+    for(let i = 0; i < telemetry_channel_count; i++){
+        let ctx = ctxs[i];
+        let data = telemetry[i];
+        let max = Math.max(...data);
+        let min = Math.min(...data);
+        ctx.clearRect(0,0,ctx.canvas.width, ctx.canvas.height);
+        ctx.beginPath();
+        ctx.moveTo(0,0);
+        for(let n = 0; n < data.length; n++){
+            ctx.lineTo(n, (data[n] - min) / (max - min) * ctx.canvas.height);
+        }
+        ctx.stroke();
+    }
+}
+
 
 
 socket.onopen = (e) => {
@@ -70,12 +112,32 @@ socket.onopen = (e) => {
     statusDisplay.innerText = "Connected";
 };
 
+
+let telemetry = [];
+for(let i = 0; i < telemetry_channel_count; i++){
+    telemetry.push([]);
+}
+
 const logBox = document.getElementById("log");
 logBox.value = "";
 socket.onmessage = (e) => {
-    console.log(e);
-    logBox.value = logBox.value += e.data + "\n";
-    logBox.scrollTop = logBox.scrollHeight;
+    if (typeof e.data == "string"){
+        console.log(e);
+        logBox.value = logBox.value += e.data + "\n";
+        logBox.scrollTop = logBox.scrollHeight;
+    }else if(e.data instanceof ArrayBuffer){
+        // Read floats until end
+        let floats = new Float32Array(e.data);
+        for(let i = 0; i < floats.length; i++){
+            telemetry[i%telemetry_channel_count].push(floats[i]);
+        }
+        for(let i = 0; i < telemetry_channel_count; i++){
+            let to_remove = Math.max(0, telemetry[i].length - ctxs[i].canvas.width);
+            console.log(to_remove);
+            telemetry[i] = telemetry[i].slice(to_remove);
+        }
+        redraw_telemetry();
+    }
 };
 
 socket.onclose = (e) => {

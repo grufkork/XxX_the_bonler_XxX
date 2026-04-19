@@ -53,6 +53,14 @@ volatile float steering = 0.0f;
 void Stop();
 void Reset();
 
+float telemetry[1024] = {};
+int telemetry_index = 0;
+
+void add_telemetry(float value) {
+  telemetry[telemetry_index] = value;
+  telemetry_index += 1;
+}
+
 AsyncWebSocketClient* latest_client = nullptr;
 void log_message(const char* message) {
   // Serial.println(message);
@@ -271,7 +279,7 @@ unsigned long timeOfLastControlInput = 0;
 void loop() {
   unsigned long currentMicros = micros();
   unsigned long micros_at_next_step = currentMicros + stepPeriodMicros;
-  float dt = (currentMicros - lastMicros) / 1'000'000.0f;
+  float dt = (currentMicros -lastMicros) / 1000000.0f;
   lastMicros = currentMicros;
   // motorL.setDuty(sin(t)* 1.0f);
   // t += 0.001;
@@ -425,6 +433,18 @@ void loop() {
 
   motorL.setCurrent(tau_refL * current_gain);
   motorR.setCurrent(tau_refR * current_gain * r_coeff);
+  
+  add_telemetry(pos);
+  add_telemetry(angle);
+  add_telemetry(velocity);
+  add_telemetry(angVel);
+  add_telemetry(tau_refL);
+  add_telemetry(tau_refR);
+
+  if(telemetry_index >= 500){
+    webSocket.binary(latest_client->id(), (uint8_t*)telemetry, telemetry_index * sizeof(float));
+    telemetry_index = 0;
+  }
   
   if (loopn % 25 == 0) {
     log_message(&("Pos: " + String(pos) + ", Ang: " + String(angle) + ", Vel: " + String(velocity) + ", Angvel: " + String(angVel))[0]);
