@@ -45,7 +45,7 @@ for(let i = 0; i < telemetry_channel_count; i++){
 let lqr_params = {
     bonler_mass: 5.4, // 0
     wheel_mass: 2.9, // 1
-    body_intertia: 0.2, // 2
+    body_intertia: 0.8, // 2
     wheel_inertia: 0.02, // 3
     g: 9.82, // 4
     com_offset: 0.3, // 5
@@ -54,17 +54,17 @@ let lqr_params = {
     tachometer_sign: 1.0, // 8
     accelerometer_sign: 1.0, // 9
     r_coeff: 1.4, // 10
-    q_x: 5, // 11
-    q_theta: 1, // 12
+    q_x: 2, // 11
+    q_theta: 10, // 12
     q_x_dot: 1, // 13
-    q_theta_dot: 1, // 14
+    q_theta_dot: 0.1, // 14
     Kp: 2.0,
     Kw: 0.8,
     Q_matrix_scalar: 1.0,
     angVelSmoothing: 0.7,
-    compFilter: 0.99,
+    compFilter: 0.995,
     accSmoothing: 0.7,
-    useKalman: 0,
+    useKalman: 1,
     tauFilter: 0.6
 };
 
