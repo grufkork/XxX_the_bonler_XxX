@@ -65,7 +65,9 @@ let lqr_params = {
     compFilter: 0.995,
     accSmoothing: 0.7,
     useKalman: 1,
-    tauFilter: 0.6
+    tauFilter: 0.6,
+    speedLimit: 5,
+    speedMult: 1,
 };
 
 for(let key in lqr_params){

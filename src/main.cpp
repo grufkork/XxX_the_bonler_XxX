@@ -39,7 +39,6 @@ float angle_offset = -0.13f; // Enter the value when bonler is straight
 
 const float MAX_ANGLE = 20.0f * DEG_TO_RAD;
 
-
 #define UNUSED0 0x01
 #define UNUSED1 0x02  
 #define UNUSED2 0x03
@@ -81,6 +80,8 @@ float l = 0.207;         // body COM length from wheel axis
 float r = 0.085;        // Wheel radius
 
 float Q = 1.0;
+float speedLimit = 5.0;
+float speedMult = 1.0;
 
 class lowPassFilter {
 public:
@@ -241,7 +242,7 @@ void setup() {
     } else if (type == WS_EVT_DATA) {
       switch(data[0]) {
         case LQR_PARAMS_MSG:
-          if (len == 1 + 23 * sizeof(float)) {  // you should as many as you have parameters. remember, zero-indexed.
+          if (len == 1 + 25 * sizeof(float)) {  // you should as many as you have parameters. remember, zero-indexed.
             float* params = (float*)(data + 1);
             M = params[0];
             m = params[1];
@@ -270,6 +271,8 @@ void setup() {
             useKalman = params[21] >= 1 ? true:false;
             tauFilterL.setAlpha(params[22]);
             tauFilterR.setAlpha(params[22]);
+            speedLimit = params[23];
+            speedMult = params[24];
             //log_message(("Q value received: " + String(params[17])).c_str());
         
             log_message("Ack, solving LQR");
@@ -289,7 +292,7 @@ void setup() {
         case CONTROL_INPUT_MSG:
           if(len == 1 + 2*sizeof(float)){
             float* in = (float*)(data + 1);
-            throttle = in[0];
+            throttle = in[0] * speedMult;
             steering = in[1];
           }
           break;
@@ -459,7 +462,7 @@ void loop() {
   float pos = (rWheelPos + lWheelPos) / 2.0f;
   float velocity = (avgWheelSpeedR + avgWheelSpeedL) / 2.0f;
   
-  if(abs(velocity) > 1.5f) {
+  if(abs(velocity) > speedLimit) {
     Stop();
     log_message("!!! Velocity too high, stopping !!!");
     return;
@@ -500,9 +503,7 @@ void loop() {
 
   yawAngle += steering * dt;
   Model.x_ref[0] += limitedThrottle * dt;
-  Model.x_ref[2] = limitedThrottle*0.5;
-
-
+  Model.x_ref[2] = limitedThrottle*0.5;  // unsure if this scaling causes some discrepency, seems to work fine. 
 
 
   float yawControl = Kp * yawAngle + Kw * yawRate;
