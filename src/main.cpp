@@ -1,11 +1,14 @@
 // TODO: kalman gör skillnad. vi kan ta bort funktionen att stänga av/på kalman filter
 // TODO: byt alla lowpass till klass-implementationen om lämpligt
+// TODO: Fix reset on angle limit hit
+// TODO: Fix joystick freaking when pressing on red square
 
 #include <Arduino.h>
 #include <AsyncTCP.h>
 #include <WiFi.h>
 #include <Wire.h>
-#include "littleFS.h"
+#include "FS.h"
+#include <LittleFS.h>
 #include <ESPAsyncWebServer.h>
 
 #include <VescUart.h>
@@ -39,7 +42,7 @@ float angle_offset = -0.13f; // Enter the value when bonler is straight
 
 const float MAX_ANGLE = 20.0f * DEG_TO_RAD;
 
-#define UNUSED0 0x01
+#define HEARTBEAT_MSG 0x01
 #define UNUSED1 0x02  
 #define UNUSED2 0x03
 #define LQR_PARAMS_MSG 0x04
@@ -82,6 +85,8 @@ float r = 0.085;        // Wheel radius
 float Q = 1.0;
 float speedLimit = 5.0;
 float speedMult = 1.0;
+
+unsigned long lastHeartbeatTime = 0;
 
 class lowPassFilter {
 public:
@@ -241,6 +246,9 @@ void setup() {
 
     } else if (type == WS_EVT_DATA) {
       switch(data[0]) {
+        case HEARTBEAT_MSG:
+          lastHeartbeatTime = millis();
+          break;
         case LQR_PARAMS_MSG:
           if (len == 1 + 25 * sizeof(float)) {  // you should as many as you have parameters. remember, zero-indexed.
             float* params = (float*)(data + 1);
@@ -280,7 +288,6 @@ void setup() {
           }
           break;
         case ON_MSG:
-          Model.resetKalman();
           runningInitialised = false;
           Reset();
           log_message("Turned on");
@@ -325,6 +332,7 @@ void Stop(){
 void Reset(){
   runningInitialised = false;
   Model.x_ref = Model.x_ref.setZero();
+  Model.resetKalman();
   log_message("Reset");
 }
 
@@ -375,6 +383,11 @@ void loop() {
     avgWheelSpeedL = 0.0f;
     avgWheelSpeedR = 0.0f;
     yawAngle = 0.0f;
+  }
+  
+  if (millis() - lastHeartbeatTime > 500) {
+    throttle = 0.0f;
+    steering = 0.0f;
   }
   
   // Serial.print(dt * 1000.0f);
@@ -471,9 +484,18 @@ void loop() {
   ReadMPU();
   
   float accelerometer = atan2f((float)AcX, (float)AcZ) - angle_offset;
+  if(justStarted){
+    lastAccAngle = accelerometer;
+  }
   float accAngle = lastAccAngle * accelerometerSmoothing + accelerometer * (1.0f - angVelSmoothing);
+  
 
   float gyroSpeed = -(float)GyY / 131.0f * DEG_TO_RAD;
+  if(justStarted){
+    lastAngle = accAngle;
+    lastAngVel = gyroSpeed;
+  }
+
   float angVel = lastAngVel * angVelSmoothing + gyroSpeed * (1.0f - angVelSmoothing);
   
  
@@ -499,11 +521,16 @@ void loop() {
   if (delta < -maxThrottleStep) delta = -maxThrottleStep;
 
   limitedThrottle += delta;
+  if(justStarted){
+    limitedThrottle = 0.0f;
+  }
 
 
   yawAngle += steering * dt;
+  // Model.x_ref[0] += limitedThrottle * dt;
   Model.x_ref[0] += limitedThrottle * dt;
-  Model.x_ref[2] = limitedThrottle*0.5;  // unsure if this scaling causes some discrepency, seems to work fine. 
+  Model.x_ref[0] = std::clamp(Model.x_ref[0] - pos, -1.0f, 1.0f) + pos;
+  Model.x_ref[2] = limitedThrottle * 0.5f;  // unsure if this scaling causes some discrepency, seems to work fine. 
 
 
   float yawControl = Kp * yawAngle + Kw * yawRate;
@@ -546,17 +573,19 @@ void loop() {
   motorL.setCurrent(tau_refL * current_gain);
   motorR.setCurrent(tau_refR * current_gain * r_coeff);
   
-  add_telemetry(pos);
-  add_telemetry(angle);
-  add_telemetry(velocity);
-  add_telemetry(angVel);
-  add_telemetry(tau_refL);
-  add_telemetry(tau_refR);
+  // add_telemetry(pos);
+  // add_telemetry(angle);
+  // add_telemetry(velocity);
+  // add_telemetry(angVel);
+  // add_telemetry(tau_refL);
+  // add_telemetry(tau_refR);
 
-  if(telemetry_index >= 200){
-    webSocket.binary(latest_client->id(), (uint8_t*)telemetry, telemetry_index * sizeof(float));
-    telemetry_index = 0;
-  }
+  // if(telemetry_index >= 200){
+  //   if(latest_client != nullptr){
+  //     webSocket.binary(latest_client->id(), (uint8_t*)telemetry, telemetry_index * sizeof(float));
+  //   }
+  //   telemetry_index = 0;
+  // }
   
   if (loopn % 25 == 0) {
     log_message(&("Pos: " + String(pos) + ", Ang: " + String(angle) + ", Vel: " + String(velocity) + ", Angvel: " + String(angVel))[0]);

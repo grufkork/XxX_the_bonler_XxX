@@ -1,4 +1,4 @@
-const UNUSED0 = 0x01;
+const HEARTBEAT_MSG = 0x01;
 const UNUSED1 = 0x02;
 const UNUSED2 = 0x03;
 const LQR_PARAMS_MSG = 0x04;
@@ -288,5 +288,9 @@ document.body.addEventListener("pointerup", (e) => {
     integrated_pos = [0,0];
     send_input([0,0]);
 });
+
+setInterval(() => {
+    socket.send(new Uint8Array([HEARTBEAT_MSG]));
+}, 250);
 
 redraw_telemetry();
